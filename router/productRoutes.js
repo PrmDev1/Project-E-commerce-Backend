@@ -1,5 +1,6 @@
 import express from 'express';
 import {addProduct, updateProduct, deleteProduct, getAllProducts, getProductById, getProductWithFilter} from '../controllers/productController.js';
+import { upload } from './middleware/upload.js';
 
 const router = express.Router();
 /**
@@ -208,48 +209,46 @@ router.post('/filter-products', getProductWithFilter);
  * @swagger
  * /api/products:
  *   post:
- *     summary: เพิ่มสินค้าใหม่เข้าสู่ระบบ
+ *     summary: เพิ่มสินค้าใหม่
+ *     description: เพิ่มสินค้าใหม่พร้อมอัปโหลดรูปภาพ (เฉพาะ Admin)
  *     tags: [Products]
+ *     security:
+ *       - bearerAuth: []
  *     requestBody:
  *       required: true
  *       content:
- *         application/json:
+ *         multipart/form-data:
  *           schema:
  *             type: object
  *             required:
  *               - productName
  *               - productDescription
- *               - productImage
  *               - productbrand
  *               - price
+ *               - stock
+ *               - productImage
  *             properties:
  *               productName:
  *                 type: string
- *                 description: ชื่อสินค้า
- *                 example: "Nike Air Max"
+ *                 example: "iPhone 15 Pro"
  *               productDescription:
  *                 type: string
- *                 description: รายละเอียดสินค้า
- *                 example: "รองเท้าวิ่งน้ำหนักเบา ใส่สบาย"
- *               productImage:
- *                 type: string
- *                 description: URL รูปภาพสินค้า
- *                 example: "https://example.com/image.jpg"
+ *                 example: "สมาร์ทโฟนรุ่นใหม่ล่าสุด"
  *               productbrand:
  *                 type: string
- *                 description: แบรนด์สินค้า
- *                 example: "Nike"
+ *                 example: "Apple"
  *               price:
  *                 type: number
- *                 description: ราคาสินค้า
- *                 example: 2500
+ *                 example: 39900
  *               stock:
  *                 type: integer
- *                 description: จำนวนสินค้าในสต็อก (ถ้าไม่ส่งมาจะ default เป็น 0)
  *                 example: 10
+ *               productImage:
+ *                 type: string
+ *                 format: binary
  *     responses:
  *       201:
- *         description: เพิ่มสินค้าสำเร็จ
+ *         description: เพิ่มสินค้าและอัปโหลดรูปภาพสำเร็จ
  *         content:
  *           application/json:
  *             schema:
@@ -257,33 +256,14 @@ router.post('/filter-products', getProductWithFilter);
  *               properties:
  *                 message:
  *                   type: string
- *                   example: "เพิ่มสินค้าสำเร็จ"
+ *                   example: "เพิ่มสินค้าและอัปโหลดรูปภาพสำเร็จ"
  *                 product:
  *                   type: object
- *                   properties:
- *                     productid:
- *                       type: string
- *                       example: "Prd1a2b3c4d"
- *                     productname:
- *                       type: string
- *                       example: "Nike Air Max"
- *                     productdescription:
- *                       type: string
- *                       example: "รองเท้าวิ่งน้ำหนักเบา ใส่สบาย"
- *                     productimage:
- *                       type: string
- *                       example: "https://example.com/image.jpg"
- *                     productbrand:
- *                       type: string
- *                       example: "Nike"
- *                     price:
- *                       type: number
- *                       example: 2500
- *                     stock:
- *                       type: integer
- *                       example: 10
+ *                 imageUrl:
+ *                   type: string
+ *                   example: "/uploads/productimage-171024xxx.jpg"
  *       400:
- *         description: รหัสสินค้านี้มีอยู่ในระบบแล้ว หรือข้อมูลไม่ถูกต้อง
+ *         description: ข้อมูลไม่ถูกต้อง หรือไม่ได้อัปโหลดรูปภาพ
  *         content:
  *           application/json:
  *             schema:
@@ -291,19 +271,13 @@ router.post('/filter-products', getProductWithFilter);
  *               properties:
  *                 message:
  *                   type: string
- *                   example: "รหัสสินค้านี้มีอยู่ในระบบแล้ว"
+ *                   example: "กรุณาอัปโหลดรูปภาพสินค้า"
+ *       401:
+ *         description: ไม่ได้รับอนุญาต
  *       500:
  *         description: เกิดข้อผิดพลาดในการเพิ่มสินค้า
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 message:
- *                   type: string
- *                   example: "เกิดข้อผิดพลาดในการเพิ่มสินค้า"
  */
-router.post('/add-product', addProduct);
+router.post('/add-product', upload.single('productImage'), addProduct);
 
 /**
  * @swagger

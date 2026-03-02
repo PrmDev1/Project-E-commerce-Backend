@@ -6,6 +6,8 @@ import cartRoutes from './router/cartRoutes.js';
 import productRoutes from './router/productRoutes.js';
 import swaggerUi from 'swagger-ui-express';
 import { swaggerSpec } from './config/swagger.js';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
 dotenv.config()
 
@@ -16,6 +18,14 @@ app.use(cors({
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+
+app.use('/uploads', express.static('uploads'));
+
+
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 app.use('/api/users', userRoutes);
 app.use('/api/cart', cartRoutes);

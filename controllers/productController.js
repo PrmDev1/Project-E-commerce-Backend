@@ -2,15 +2,24 @@ import database from '../config/database.js';
 
 import crypto from 'crypto'; 
 
+import crypto from 'crypto';
+
 export const addProduct = async (req, res) => {
-    // รับข้อมูลสินค้าจาก Body
-    const { productName, productDescription, productImage, productbrand, price, stock } = req.body;
+    // 1. รับข้อมูลจาก req.body
+    const { productName, productDescription, productbrand, price, stock } = req.body;
 
     try {
+        // 2. ตรวจสอบว่ามีไฟล์ส่งมาไหม
+        // ถ้าไม่มีไฟล์ส่งมาให้ใช้ค่า null หรือจะ return error ก็ได้ครับ
+        const productImage = req.file ? req.file.filename : null;
+
+        if (!productImage) {
+            return res.status(400).json({ message: "กรุณาอัปโหลดรูปภาพสินค้า" });
+        }
 
         const productId = `Prd${crypto.randomBytes(4).toString('hex')}`;
 
-        // ตรวจสอบก่อนว่า productId นี้มีอยู่แล้วหรือยัง
+        // ตรวจสอบ productId ซ้ำ (เหมือนเดิม)
         const checkProduct = await database.query(
             'SELECT * FROM Products WHERE productid = $1',
             [productId]
@@ -20,7 +29,7 @@ export const addProduct = async (req, res) => {
             return res.status(400).json({ message: "รหัสสินค้านี้มีอยู่ในระบบแล้ว" });
         }
 
-        // บันทึกข้อมูลลงในตาราง Products
+        // 3. บันทึกข้อมูล (ใช้ชื่อไฟล์จาก multer ที่เก็บใน productImage)
         const queryText = `
             INSERT INTO Products (productid, productname, productdescription, productimage, productbrand, price, stock) 
             VALUES ($1, $2, $3, $4, $5, $6, $7) 
@@ -31,15 +40,16 @@ export const addProduct = async (req, res) => {
             productId,
             productName,
             productDescription,
-            productImage,
+            productImage, // เก็บชื่อไฟล์ เช่น "productimage-171024xxx.jpg"
             productbrand,
             price,
-            stock || 0 // ถ้าไม่ส่งมาให้เป็น 0
+            stock || 0
         ]);
 
         res.status(201).json({
-            message: "เพิ่มสินค้าสำเร็จ",
-            product: newProduct.rows[0]
+            message: "เพิ่มสินค้าและอัปโหลดรูปภาพสำเร็จ",
+            product: newProduct.rows[0],
+            imageUrl: `/uploads/${productImage}` // ส่ง URL กลับไปให้หน้าบ้านแสดงผลได้เลย
         });
 
     } catch (error) {
