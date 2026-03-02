@@ -55,26 +55,30 @@ export const addProduct = async (req, res) => {
     }
 };
 
+// --- ฟังก์ชันแก้ไขสินค้า (Update Product) ---
 export const updateProduct = async (req, res) => {
     const { productid } = req.params;
     const { productName, productDescription, productBrand, price, stock } = req.body;
-
+    
     try {
-        // 1. ดึงข้อมูลสินค้าเดิมมาดูว่ามีรูปเก่าชื่ออะไร
+        // 1. ตรวจสอบสินค้าเดิมก่อนเพื่อเอารูปเก่า
         const checkProduct = await database.query('SELECT * FROM Products WHERE productid = $1', [productid]);
-        
         if (checkProduct.rows.length === 0) {
+            // ถ้าไม่พบสินค้า และมีการอัปโหลดรูปมาใหม่ ให้ลบรูปใหม่ทิ้งก่อน return 404
+            if (req.file) {
+                const newPath = path.join('uploads', req.file.filename);
+                if (fs.existsSync(newPath)) fs.unlinkSync(newPath);
+            }
             return res.status(404).json({ message: "ไม่พบสินค้าที่ต้องการแก้ไข" });
         }
 
         const oldProduct = checkProduct.rows[0];
-        let productImage = oldProduct.productimage; // ใช้รูปเดิมเป็นค่าเริ่มต้น
+        let productImage = oldProduct.productimage; 
 
-        // 2. ถ้ามีการอัปโหลดรูปใหม่เข้ามา (ผ่าน multer)
+        // 2. จัดการรูปภาพ (ถ้ามีการส่งรูปใหม่มา ให้ลบรูปเก่าทิ้ง)
         if (req.file) {
-            productImage = req.file.filename; // ใช้ชื่อรูปใหม่
+            productImage = req.file.filename; 
 
-            // ลบรูปเก่าออกจาก folder uploads (ถ้ามีรูปเก่าอยู่จริง)
             if (oldProduct.productimage) {
                 const oldPath = path.join('uploads', oldProduct.productimage);
                 if (fs.existsSync(oldPath)) {
@@ -83,15 +87,15 @@ export const updateProduct = async (req, res) => {
             }
         }
 
-        // 3. อัปเดตข้อมูล (ระวังชื่อคอลัมน์ productbrand ให้ตรงกับ DB)
+        // 3. อัปเดตข้อมูลทั้งหมด (Full Update - ไม่ใช้ COALESCE เพื่อบังคับส่งค่าใหม่)
         const queryText = `
             UPDATE Products 
-            SET productname = COALESCE($1, productname),
-                productdescription = COALESCE($2, productdescription),
-                productimage = COALESCE($3, productimage),
-                productbrand = COALESCE($4, productbrand),
-                price = COALESCE($5, price),
-                stock = COALESCE($6, stock)
+            SET productname = $1,
+                productdescription = $2,
+                productimage = $3,
+                productbrand = $4,
+                price = $5,
+                stock = $6
             WHERE productid = $7
             RETURNING *
         `;
@@ -100,18 +104,24 @@ export const updateProduct = async (req, res) => {
             productName, 
             productDescription, 
             productImage, 
-            productBrand, // แก้เป็น productbrand ตาม SQL ที่คุณให้มา
+            productBrand, 
             price, 
             stock, 
             productid
         ]);
 
         res.status(200).json({
-            message: "อัปเดตข้อมูลสินค้าและจัดการรูปภาพเรียบร้อย",
-            product: result.rows[0]
+            message: "แก้ไขข้อมูลสินค้าสำเร็จ",
+            product: result.rows[0],
+            imageUrl: `/uploads/${productImage}`
         });
 
     } catch (error) {
+        // หากเกิดข้อผิดพลาดในการ Query ให้ลบรูปที่อัปโหลดมาใหม่ออก (ถ้ามี)
+        if (req.file) {
+            const newPath = path.join('uploads', req.file.filename);
+            if (fs.existsSync(newPath)) fs.unlinkSync(newPath);
+        }
         console.error("Update Product Error:", error);
         res.status(500).json({ message: "เกิดข้อผิดพลาดในการอัปเดตสินค้า" });
     }

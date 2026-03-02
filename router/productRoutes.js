@@ -207,7 +207,7 @@ router.post('/filter-products', getProductWithFilter);
 
 /**
  * @swagger
- * /api/products:
+ * /api/products/add-product:
  *   post:
  *     summary: เพิ่มสินค้าใหม่
  *     description: เพิ่มสินค้าใหม่พร้อมอัปโหลดรูปภาพ (เฉพาะ Admin)
@@ -281,7 +281,7 @@ router.post('/add-product', upload.single('productImage'), addProduct);
 
 /**
  * @swagger
- * /api/products/{productid}:
+ * /api/products/update-product/{productid}:
  *   put:
  *     summary: อัปเดตข้อมูลสินค้า
  *     tags: [Products]
