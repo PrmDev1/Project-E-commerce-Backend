@@ -1,37 +1,28 @@
 import database from '../config/database.js';
 
 import crypto from 'crypto'; 
-
-import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
 
 export const addProduct = async (req, res) => {
-    // 1. รับข้อมูลจาก req.body
-    const { productName, productDescription, productbrand, price, stock } = req.body;
+    // 1. รับข้อมูลจาก req.body (ชื่อตัวแปรให้ตรงกับที่หน้าบ้านจะส่งมา)
+    const { productName, productDescription, productBrand, price, stock } = req.body;
 
     try {
-        // 2. ตรวจสอบว่ามีไฟล์ส่งมาไหม
-        // ถ้าไม่มีไฟล์ส่งมาให้ใช้ค่า null หรือจะ return error ก็ได้ครับ
+        // 2. จัดการรูปภาพจาก multer
         const productImage = req.file ? req.file.filename : null;
 
         if (!productImage) {
             return res.status(400).json({ message: "กรุณาอัปโหลดรูปภาพสินค้า" });
         }
 
+        // 3. สร้าง ID สินค้า
         const productId = `Prd${crypto.randomBytes(4).toString('hex')}`;
 
-        // ตรวจสอบ productId ซ้ำ (เหมือนเดิม)
-        const checkProduct = await database.query(
-            'SELECT * FROM Products WHERE productid = $1',
-            [productId]
-        );
-
-        if (checkProduct.rows.length > 0) {
-            return res.status(400).json({ message: "รหัสสินค้านี้มีอยู่ในระบบแล้ว" });
-        }
-
-        // 3. บันทึกข้อมูล (ใช้ชื่อไฟล์จาก multer ที่เก็บใน productImage)
+        // 4. บันทึกข้อมูล (ตรวจสอบชื่อ Column ใน SQL ให้ตรงกับ Schema ของคุณ)
+        // จาก SQL ที่คุณให้มา: productId, productName, productDescription, productImage, productBrand, price, stock
         const queryText = `
-            INSERT INTO Products (productid, productname, productdescription, productimage, productbrand, price, stock) 
+            INSERT INTO Products (productId, productName, productDescription, productImage, productBrand, price, stock) 
             VALUES ($1, $2, $3, $4, $5, $6, $7) 
             RETURNING *
         `;
@@ -40,19 +31,25 @@ export const addProduct = async (req, res) => {
             productId,
             productName,
             productDescription,
-            productImage, // เก็บชื่อไฟล์ เช่น "productimage-171024xxx.jpg"
-            productbrand,
+            productImage, 
+            productBrand,
             price,
-            stock || 0
+            stock || 10 // ตาม Schema ของคุณ DEFAULT คือ 10
         ]);
 
         res.status(201).json({
-            message: "เพิ่มสินค้าและอัปโหลดรูปภาพสำเร็จ",
+            message: "เพิ่มสินค้าสำเร็จ",
             product: newProduct.rows[0],
-            imageUrl: `/uploads/${productImage}` // ส่ง URL กลับไปให้หน้าบ้านแสดงผลได้เลย
+            imageUrl: `/uploads/${productImage}`
         });
 
     } catch (error) {
+        // หากเกิด Error แต่รูปถูกเซฟไปแล้ว ควรลบรูปทิ้งเพื่อไม่ให้เป็นไฟล์ขยะ
+        if (req.file) {
+            const filePath = path.join('uploads', req.file.filename);
+            if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+        }
+        
         console.error("Add Product Error:", error);
         res.status(500).json({ message: "เกิดข้อผิดพลาดในการเพิ่มสินค้า" });
     }
@@ -60,34 +57,57 @@ export const addProduct = async (req, res) => {
 
 export const updateProduct = async (req, res) => {
     const { productid } = req.params;
-    const { productName, productDescription, productImage, price, stock } = req.body;
+    const { productName, productDescription, productBrand, price, stock } = req.body;
 
     try {
-        // ตรวจสอบว่ามีสินค้านี้จริงไหม
+        // 1. ดึงข้อมูลสินค้าเดิมมาดูว่ามีรูปเก่าชื่ออะไร
         const checkProduct = await database.query('SELECT * FROM Products WHERE productid = $1', [productid]);
         
         if (checkProduct.rows.length === 0) {
             return res.status(404).json({ message: "ไม่พบสินค้าที่ต้องการแก้ไข" });
         }
 
-        // อัปเดตข้อมูล (ใช้ COALESCE เพื่อคงค่าเดิมไว้หากไม่ได้ส่งฟิลด์นั้นมา)
+        const oldProduct = checkProduct.rows[0];
+        let productImage = oldProduct.productimage; // ใช้รูปเดิมเป็นค่าเริ่มต้น
+
+        // 2. ถ้ามีการอัปโหลดรูปใหม่เข้ามา (ผ่าน multer)
+        if (req.file) {
+            productImage = req.file.filename; // ใช้ชื่อรูปใหม่
+
+            // ลบรูปเก่าออกจาก folder uploads (ถ้ามีรูปเก่าอยู่จริง)
+            if (oldProduct.productimage) {
+                const oldPath = path.join('uploads', oldProduct.productimage);
+                if (fs.existsSync(oldPath)) {
+                    fs.unlinkSync(oldPath); 
+                }
+            }
+        }
+
+        // 3. อัปเดตข้อมูล (ระวังชื่อคอลัมน์ productbrand ให้ตรงกับ DB)
         const queryText = `
             UPDATE Products 
             SET productname = COALESCE($1, productname),
                 productdescription = COALESCE($2, productdescription),
                 productimage = COALESCE($3, productimage),
-                price = COALESCE($4, price),
-                stock = COALESCE($5, stock)
-            WHERE productid = $6
+                productbrand = COALESCE($4, productbrand),
+                price = COALESCE($5, price),
+                stock = COALESCE($6, stock)
+            WHERE productid = $7
             RETURNING *
         `;
 
         const result = await database.query(queryText, [
-            productName, productDescription, productImage, price, stock, productid
+            productName, 
+            productDescription, 
+            productImage, 
+            productBrand, // แก้เป็น productbrand ตาม SQL ที่คุณให้มา
+            price, 
+            stock, 
+            productid
         ]);
 
         res.status(200).json({
-            message: "อัปเดตข้อมูลสินค้าสำเร็จ",
+            message: "อัปเดตข้อมูลสินค้าและจัดการรูปภาพเรียบร้อย",
             product: result.rows[0]
         });
 
