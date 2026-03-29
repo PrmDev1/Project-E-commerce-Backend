@@ -1,9 +1,38 @@
 // middleware/verifyToken.js
 import jwt from 'jsonwebtoken';
 
+const readTokenFromRequest = (req) => {
+    const cookieToken = req?.cookies?.token;
+    if (cookieToken) {
+        return cookieToken;
+    }
+
+    const rawCookieHeader = req?.headers?.cookie;
+    if (typeof rawCookieHeader === 'string' && rawCookieHeader.length > 0) {
+        const tokenPair = rawCookieHeader
+            .split(';')
+            .map((part) => part.trim())
+            .find((part) => part.startsWith('token='));
+
+        if (tokenPair) {
+            const value = tokenPair.slice('token='.length);
+            if (value) {
+                return decodeURIComponent(value);
+            }
+        }
+    }
+
+    const authHeader = req?.headers?.authorization;
+    if (typeof authHeader === 'string' && authHeader.toLowerCase().startsWith('bearer ')) {
+        return authHeader.slice(7).trim();
+    }
+
+    return null;
+};
+
 export const verifyToken = (req, res, next) => {
     // 1. ดึง Token ออกมาจาก Cookie
-    const token = req.cookies.token;
+    const token = readTokenFromRequest(req);
 
     // 2. ถ้าไม่มี Token แปลว่ายังไม่ได้ Login
     if (!token) {

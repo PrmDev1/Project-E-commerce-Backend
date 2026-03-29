@@ -354,7 +354,7 @@ router.post('/add-product', upload.single('productImage'), addProduct);
  *                   type: string
  *                   example: "เกิดข้อผิดพลาดในการอัปเดตสินค้า"
  */
-router.put('/update-product/:productid', updateProduct);
+router.put('/update-product/:productid', upload.single('productImage'), updateProduct);
 
 /**
  * @swagger

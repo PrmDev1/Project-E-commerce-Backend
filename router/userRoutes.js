@@ -1,5 +1,5 @@
 import express from 'express';
-import { register, login, addAddress, getAllUsers, editUserProfile, getAllOrderHistory } from '../controllers/userController.js';
+import { register, login, addAddress, getMyAddresses, getAllUsers, editUserProfile, getAllOrderHistory, getMyPaidOrderHistory } from '../controllers/userController.js';
 import { verifyToken, verifyRole } from '../middleware/verifyToken.js';
 
 const router = express.Router();
@@ -262,6 +262,7 @@ router.post('/login', login);
  *                   example: "ไม่สามารถเพิ่มที่อยู่ได้"
  */
 router.post('/add-address', verifyToken, addAddress);
+router.get('/addresses', verifyToken, getMyAddresses);
 
 /**
  * @swagger
@@ -566,6 +567,7 @@ router.patch('/edit-profile', verifyToken, verifyRole(['admin']), editUserProfil
  *                   type: string
  *                   example: "เกิดข้อผิดพลาดในการดึงข้อมูลประวัติการสั่งซื้อ"
  */
-router.get('/history', verifyToken, verifyRole(["admin"], getAllOrderHistory));
+router.get('/history', verifyToken, verifyRole(["admin"]), getAllOrderHistory);
+router.get('/my-history', verifyToken, getMyPaidOrderHistory);
 
 export default router;

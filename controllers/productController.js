@@ -4,9 +4,57 @@ import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 
+const toImageUrl = (imagePath) => {
+    if (!imagePath) return null;
+    if (imagePath.startsWith('/')) return imagePath;
+    return `/uploads/${imagePath}`;
+};
+
+const normalizeGender = (value) => {
+    const raw = String(value || '').trim().toLowerCase();
+    if (raw === 'men' || raw === 'women' || raw === 'unisex') return raw;
+    return 'unisex';
+};
+
+const ensureProductGenderColumn = async () => {
+    const columnInfo = await database.query(`
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'products'
+          AND column_name IN ('productGender', 'productgender')
+    `);
+
+    const hasCamelGender = columnInfo.rows.some((row) => row.column_name === 'productGender');
+    const hasLegacyGender = columnInfo.rows.some((row) => row.column_name === 'productgender');
+
+    if (!hasCamelGender) return;
+
+    if (hasLegacyGender) {
+        await database.query(`
+            UPDATE Products
+            SET "productGender" = COALESCE("productGender", NULLIF(TRIM(productgender), ''))
+        `);
+    }
+
+    await database.query(`
+        UPDATE Products
+        SET "productGender" = LOWER(TRIM("productGender"))
+        WHERE "productGender" IS NOT NULL
+    `);
+
+    await database.query(`
+        UPDATE Products
+        SET "productGender" = 'unisex'
+        WHERE "productGender" IS NULL
+           OR TRIM("productGender") = ''
+           OR "productGender" NOT IN ('men', 'women', 'unisex')
+    `);
+};
+
 export const addProduct = async (req, res) => {
     // 1. รับข้อมูลจาก req.body (ชื่อตัวแปรให้ตรงกับที่หน้าบ้านจะส่งมา)
-    const { productName, productDescription, productBrand, price, stock } = req.body;
+    const { productName, productDescription, productBrand, price, stock, productGender } = req.body;
 
     try {
         // 2. จัดการรูปภาพจาก multer
@@ -18,12 +66,15 @@ export const addProduct = async (req, res) => {
 
         // 3. สร้าง ID สินค้า
         const productId = `Prd${crypto.randomBytes(4).toString('hex')}`;
+        const gender = normalizeGender(productGender);
+
+        await ensureProductGenderColumn();
 
         // 4. บันทึกข้อมูล (ตรวจสอบชื่อ Column ใน SQL ให้ตรงกับ Schema ของคุณ)
         // จาก SQL ที่คุณให้มา: productId, productName, productDescription, productImage, productBrand, price, stock
         const queryText = `
-            INSERT INTO Products (productId, productName, productDescription, productImage, productBrand, price, stock) 
-            VALUES ($1, $2, $3, $4, $5, $6, $7) 
+            INSERT INTO Products (productId, productName, productDescription, productImage, productBrand, price, stock, "productGender") 
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8) 
             RETURNING *
         `;
 
@@ -34,7 +85,8 @@ export const addProduct = async (req, res) => {
             productImage, 
             productBrand,
             price,
-            stock || 10 // ตาม Schema ของคุณ DEFAULT คือ 10
+            stock || 10, // ตาม Schema ของคุณ DEFAULT คือ 10
+            gender,
         ]);
 
         res.status(201).json({
@@ -58,7 +110,7 @@ export const addProduct = async (req, res) => {
 // --- ฟังก์ชันแก้ไขสินค้า (Update Product) ---
 export const updateProduct = async (req, res) => {
     const { productid } = req.params;
-    const { productName, productDescription, productBrand, price, stock } = req.body;
+    const { productName, productDescription, productBrand, price, stock, productGender } = req.body;
     
     try {
         // 1. ตรวจสอบสินค้าเดิมก่อนเพื่อเอารูปเก่า
@@ -74,6 +126,9 @@ export const updateProduct = async (req, res) => {
 
         const oldProduct = checkProduct.rows[0];
         let productImage = oldProduct.productimage; 
+        const gender = normalizeGender(productGender || oldProduct.productGender || oldProduct.productgender);
+
+        await ensureProductGenderColumn();
 
         // 2. จัดการรูปภาพ (ถ้ามีการส่งรูปใหม่มา ให้ลบรูปเก่าทิ้ง)
         if (req.file) {
@@ -95,8 +150,9 @@ export const updateProduct = async (req, res) => {
                 productimage = $3,
                 productbrand = $4,
                 price = $5,
-                stock = $6
-            WHERE productid = $7
+                stock = $6,
+                "productGender" = $7
+            WHERE productid = $8
             RETURNING *
         `;
 
@@ -107,6 +163,7 @@ export const updateProduct = async (req, res) => {
             productBrand, 
             price, 
             stock, 
+            gender,
             productid
         ]);
 
@@ -131,19 +188,37 @@ export const deleteProduct = async (req, res) => {
     const { productid } = req.params;
 
     try {
+        const usageChecks = [
+            { table: 'Cart', column: 'productid' },
+            { table: 'Cart', column: 'productId' },
+            { table: 'CartItems', column: 'productid' },
+            { table: 'CartItems', column: 'productId' },
+            { table: 'OrderItems', column: 'productid' },
+            { table: 'OrderItems', column: 'productId' },
+        ];
 
-        // 1️⃣ ตรวจสอบว่าถูกใช้งานในตะกร้าหรือคำสั่งซื้อหรือไม่
-        const checkUsage = await database.query(
-            `
-            SELECT 1 FROM CartItems WHERE productid = $1
-            UNION
-            SELECT 1 FROM OrderItems WHERE productid = $1
-            LIMIT 1
-            `,
-            [productid]
-        );
+        let isInUse = false;
 
-        if (checkUsage.rowCount > 0) {
+        for (const check of usageChecks) {
+            try {
+                const checkUsage = await database.query(
+                    `SELECT 1 FROM ${check.table} WHERE ${check.column} = $1 LIMIT 1`,
+                    [productid]
+                );
+
+                if (checkUsage.rowCount > 0) {
+                    isInUse = true;
+                    break;
+                }
+            } catch (error) {
+                if (error?.code === '42P01' || error?.code === '42703') {
+                    continue;
+                }
+                throw error;
+            }
+        }
+
+        if (isInUse) {
             return res.status(400).json({
                 message: "ไม่สามารถลบสินค้าได้ เนื่องจากมีการใช้งานอยู่ในระบบ"
             });
@@ -175,14 +250,24 @@ export const deleteProduct = async (req, res) => {
 
 export const getAllProducts = async (req, res) => {
     try {
+        await ensureProductGenderColumn();
         // ดึงข้อมูลทั้งหมดจากตาราง Products เรียงตามชื่อหรือเวลาที่เพิ่มก็ได้
         const queryText = 'SELECT * FROM Products ORDER BY productname ASC';
         const result = await database.query(queryText);
 
+        const products = result.rows.map((product) => ({
+            ...product,
+            imageUrl: product.productimage
+                ? product.productimage.startsWith('/')
+                    ? product.productimage
+                    : `/uploads/${product.productimage}`
+                : null,
+        }));
+
         res.status(200).json({
             message: "ดึงข้อมูลสินค้าสำเร็จ",
             count: result.rowCount,
-            products: result.rows
+            products
         });
     } catch (error) {
         console.error("Get All Products Error:", error);
@@ -191,9 +276,14 @@ export const getAllProducts = async (req, res) => {
 };
 
 export const getProductById = async (req, res) => {
-    const { productid } = req.params;
+    const productid = String(req.params.productid || '').trim();
 
     try {
+        await ensureProductGenderColumn();
+        if (!productid) {
+            return res.status(400).json({ message: "กรุณาระบุรหัสสินค้า" });
+        }
+
         const queryText = 'SELECT * FROM Products WHERE productid = $1';
         const result = await database.query(queryText, [productid]);
 
@@ -201,9 +291,14 @@ export const getProductById = async (req, res) => {
             return res.status(404).json({ message: "ไม่พบสินค้าที่ระบุ" });
         }
 
+        const product = {
+            ...result.rows[0],
+            imageUrl: toImageUrl(result.rows[0].productimage),
+        };
+
         res.status(200).json({
             message: "ดึงข้อมูลสินค้าสำเร็จ",
-            product: result.rows[0]
+            product
         });
     } catch (error) {
         console.error("Get Product By ID Error:", error);
@@ -216,6 +311,7 @@ export const getProductWithFilter = async (req, res) => {
     const { filter } = req.body; 
 
     try {
+        await ensureProductGenderColumn();
         // 1. สร้างโครง Query เริ่มต้น
         let query = 'SELECT * FROM Products WHERE 1=1';
         
@@ -228,34 +324,45 @@ export const getProductWithFilter = async (req, res) => {
             // 💡 แก้ไข: เปลี่ยนจาก = เป็น ILIKE เพื่อค้นหาแบบไม่สนใจตัวพิมพ์เล็ก/ใหญ่ 
             // ตัวอย่าง: ถ้าผู้ใช้ส่ง "adidas" ระบบจะเจอทั้ง "Adidas", "ADIDAS", "adidas"
             if (filter.brand) {
-                query +=  `AND productBrand ILIKE $${valueIndex}`;
+                query +=  ` AND productBrand ILIKE $${valueIndex}`;
                 values.push(filter.brand); 
                 valueIndex++;
             }
 
             // ถ้ามีระบุ name ให้กรองตาม productName 
             if (filter.name) {
-                query +=  `AND productName ILIKE $${valueIndex}`;
+                query +=  ` AND productName ILIKE $${valueIndex}`;
                 values.push(`%${filter.name}%`); 
                 valueIndex++;
             }
 
             // ถ้ามีระบุ price ให้กรองตาม price
-            if (filter.price) {
-                query +=  `AND price <= $${valueIndex}`; 
+            if (filter.price !== undefined && filter.price !== null && filter.price !== '') {
+                query +=  ` AND price <= $${valueIndex}`; 
                 values.push(filter.price);
+                valueIndex++;
+            }
+
+            if (filter.gender) {
+                query += ` AND "productGender" ILIKE $${valueIndex}`;
+                values.push(String(filter.gender).trim().toLowerCase());
                 valueIndex++;
             }
         }
 
         // 3. สั่งรัน Query
-        const result = await pool.query(query, values);
+        const result = await database.query(query, values);
+
+        const products = result.rows.map((product) => ({
+            ...product,
+            imageUrl: toImageUrl(product.productimage),
+        }));
 
         // 4. ส่งผลลัพธ์กลับไป
         res.status(200).json({
             message: "ค้นหาสินค้าสำเร็จ",
-            total_found: result.rows.length,
-            products: result.rows
+            total_found: products.length,
+            products
         });
 
     } catch (error) {

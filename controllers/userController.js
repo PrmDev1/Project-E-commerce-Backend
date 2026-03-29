@@ -29,9 +29,9 @@ export const register = async (req, res) => {
 
         const user = newUser.rows[0];
 
-        // 5. 🎯 สร้าง JWT Token (เอา ID และชื่อใส่ลงไปใน Token)
+        // 5. 🎯 สร้าง JWT Token
         const token = jwt.sign(
-            { id: user.userid, name: user.username, role: user.role }, 
+            { id: user.userid, name: user.username, username: user.username, role: user.role, email: user.email }, 
             process.env.JWT_SECRET, 
             { expiresIn: '1d' } // หมดอายุใน 1 วัน
         );
@@ -85,7 +85,7 @@ export const login = async (req, res) => {
 
         // 3. 🎯 สร้าง JWT Token เมื่อรหัสผ่านถูกต้อง
         const token = jwt.sign(
-            { id: user.userid, name: user.username }, 
+            { id: user.userid, name: user.username, role: user.role, email: user.email }, 
             process.env.JWT_SECRET, 
             { expiresIn: '1d' }
         );
@@ -103,7 +103,8 @@ export const login = async (req, res) => {
             user: {
                 id: user.userid,
                 name: user.username,
-                email: user.email
+                email: user.email,
+                role: user.role
             }
         });
 
@@ -150,6 +151,29 @@ export const addAddress = async (req, res) => {
     } catch (error) {
         console.error("Add Address Error:", error);
         res.status(500).json({ message: "ไม่สามารถเพิ่มที่อยู่ได้" });
+    }
+};
+
+export const getMyAddresses = async (req, res) => {
+    const userId = req.user.id;
+
+    try {
+        const queryText = `
+            SELECT addressId, userId, province, district, locality, postCode, name, number, note
+            FROM Addresses
+            WHERE userId = $1
+            ORDER BY addressId DESC
+        `;
+
+        const result = await database.query(queryText, [userId]);
+
+        res.status(200).json({
+            message: "ดึงข้อมูลที่อยู่สำเร็จ",
+            addresses: result.rows
+        });
+    } catch (error) {
+        console.error("Get My Addresses Error:", error);
+        res.status(500).json({ message: "ไม่สามารถดึงข้อมูลที่อยู่ได้" });
     }
 };
 
@@ -314,6 +338,58 @@ export const getAllOrderHistory = async (req, res) => {
 
     } catch (error) {
         console.error("Get All Users Order History Error:", error);
+        res.status(500).json({ message: "เกิดข้อผิดพลาดในการดึงข้อมูลประวัติการสั่งซื้อ" });
+    }
+};
+
+export const getMyPaidOrderHistory = async (req, res) => {
+    const userId = req.user?.id;
+
+    if (!userId) {
+        return res.status(401).json({ message: "กรุณาเข้าสู่ระบบก่อนทำรายการ" });
+    }
+
+    try {
+        const query = `
+            WITH OrderDetails AS (
+                SELECT 
+                    oi.orderid,
+                    json_agg(
+                        json_build_object(
+                            'itemid', oi.itemid,
+                            'productid', oi.productid,
+                            'productname', p.productname,
+                            'productimage', p.productimage,
+                            'quantity', oi.quantity,
+                            'size', oi.size,
+                            'price', oi.price
+                        )
+                    ) AS items
+                FROM OrderItems oi
+                LEFT JOIN Products p ON oi.productid = p.productid
+                GROUP BY oi.orderid
+            )
+            SELECT 
+                o.orderid,
+                o.totalamount,
+                o.status,
+                o.datetime,
+                COALESCE(od.items, '[]'::json) AS items
+            FROM Orders o
+            LEFT JOIN OrderDetails od ON o.orderid = od.orderid
+                        WHERE o.userid = $1
+            ORDER BY o.datetime DESC;
+        `;
+
+        const result = await database.query(query, [userId]);
+
+        res.status(200).json({
+            message: "ดึงประวัติการสั่งซื้อสำเร็จ",
+            total_orders: result.rows.length,
+            orders: result.rows,
+        });
+    } catch (error) {
+        console.error("Get My Paid Order History Error:", error);
         res.status(500).json({ message: "เกิดข้อผิดพลาดในการดึงข้อมูลประวัติการสั่งซื้อ" });
     }
 };

@@ -14,16 +14,15 @@ dotenv.config()
 const app = express();
 app.use(express.json());
 app.use(cors({
-  origin: 'http://localhost:5173', // ปรับเป็น URL ของ frontend ของคุณ
+  origin: 'http://localhost:3000', // ปรับเป็น URL ของ frontend ของคุณ
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
 const __filename = fileURLToPath(import.meta.url);
-//const __dirname = path.dirname(__filename);
+const __dirname = path.dirname(__filename);
 
-
-app.use('/uploads', express.static('uploads'));
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 app.use('/api/users', userRoutes);

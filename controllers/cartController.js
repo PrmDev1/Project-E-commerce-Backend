@@ -10,6 +10,39 @@ export const addToCart = async (req, res) => {
     //const userId = req.user.id; 
 
     try {
+        const safeQuantity = Math.max(1, Number(quantity) || 1);
+        const safeSize = String(size || '').trim();
+
+        if (!safeSize) {
+            return res.status(400).json({ message: "กรุณาเลือกไซซ์ก่อนเพิ่มสินค้าลงตะกร้า" });
+        }
+
+        const existingQuery = `
+            SELECT cartid, quantity
+            FROM Cart
+            WHERE userid = $1
+              AND productid = $2
+              AND COALESCE(size, 'Default') = $3
+            LIMIT 1
+        `;
+
+        const existing = await database.query(existingQuery, [userId, productId, safeSize]);
+
+        if (existing.rows.length > 0) {
+            const current = Number(existing.rows[0].quantity) || 0;
+            const nextQuantity = current + safeQuantity;
+
+            await database.query(
+                `UPDATE Cart SET quantity = $1 WHERE cartid = $2`,
+                [nextQuantity, existing.rows[0].cartid]
+            );
+
+            return res.status(200).json({
+                message: "เพิ่มจำนวนสินค้าในตะกร้าเรียบร้อย",
+                cartId: existing.rows[0].cartid,
+            });
+        }
+
         // 1. สร้าง cartId แบบสุ่ม (Prefix 'Crt' + hex 8 ตัว)
         const cartid = `Crt${crypto.randomBytes(4).toString('hex')}`;
 
@@ -23,8 +56,8 @@ export const addToCart = async (req, res) => {
             cartid, 
             userId, 
             productId, 
-            quantity, 
-            size  
+            safeQuantity, 
+            safeSize
         ]);
 
         res.status(200).json({ 
