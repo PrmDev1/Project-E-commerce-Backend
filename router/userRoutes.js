@@ -1,5 +1,5 @@
 import express from 'express';
-import { register, login, addAddress, getMyAddresses, getAllUsers, editUserProfile, getAllOrderHistory, getMyPaidOrderHistory } from '../controllers/userController.js';
+import { register, login, addAddress, getMyAddresses, getAllUsers, editUserProfile, getAllOrderHistory, getMyPaidOrderHistory, editAddress, editOwnProfile } from '../controllers/userController.js';
 import { verifyToken, verifyRole } from '../middleware/verifyToken.js';
 
 const router = express.Router();
@@ -569,5 +569,13 @@ router.patch('/edit-profile', verifyToken, verifyRole(['admin']), editUserProfil
  */
 router.get('/history', verifyToken, verifyRole(["admin"]), getAllOrderHistory);
 router.get('/my-history', verifyToken, getMyPaidOrderHistory);
+
+// Update an address (for logged-in user)
+
+// Update an address (for logged-in user)
+router.put('/address/:addressId', verifyToken, editAddress);
+
+// Update own profile (for logged-in user)
+router.put('/profile', verifyToken, editOwnProfile);
 
 export default router;

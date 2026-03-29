@@ -85,8 +85,8 @@ export const login = async (req, res) => {
 
         // 3. 🎯 สร้าง JWT Token เมื่อรหัสผ่านถูกต้อง
         const token = jwt.sign(
-            { id: user.userid, name: user.username, role: user.role, email: user.email }, 
-            process.env.JWT_SECRET, 
+            { id: user.userid, username: user.username, name: user.username, role: user.role, email: user.email },
+            process.env.JWT_SECRET,
             { expiresIn: '1d' }
         );
 
@@ -391,5 +391,85 @@ export const getMyPaidOrderHistory = async (req, res) => {
     } catch (error) {
         console.error("Get My Paid Order History Error:", error);
         res.status(500).json({ message: "เกิดข้อผิดพลาดในการดึงข้อมูลประวัติการสั่งซื้อ" });
+    }
+};
+
+// Update an existing address for the current user
+export const editAddress = async (req, res) => {
+    const { addressId } = req.params;
+    const { province, district, locality, postCode, name, number, note } = req.body;
+    const userId = req.user.id;
+
+    if (!addressId) {
+        return res.status(400).json({ message: "กรุณาระบุ Address ID ที่ต้องการแก้ไข" });
+    }
+
+    try {
+        // Update only if the address belongs to the user
+        const query = `
+            UPDATE Addresses
+            SET province = $1, district = $2, locality = $3, postCode = $4, name = $5, number = $6, note = $7
+            WHERE addressId = $8 AND userId = $9
+            RETURNING *;
+        `;
+        const result = await database.query(query, [province, district, locality, postCode, name, number, note, addressId, userId]);
+        if (result.rowCount === 0) {
+            return res.status(404).json({ message: "ไม่พบที่อยู่นี้ หรือคุณไม่มีสิทธิ์แก้ไข" });
+        }
+        res.status(200).json({
+            message: "อัปเดตที่อยู่สำเร็จ",
+            address: result.rows[0]
+        });
+    } catch (error) {
+        console.error("Edit Address Error:", error);
+        res.status(500).json({ message: "เกิดข้อผิดพลาดในการอัปเดตที่อยู่" });
+    }
+};
+
+// Update own profile (name, username)
+export const editOwnProfile = async (req, res) => {
+    const userId = req.user.id;
+    const { username } = req.body;
+
+    if (!userId) {
+        return res.status(401).json({ message: "กรุณาเข้าสู่ระบบก่อนทำรายการ" });
+    }
+    if (!username) {
+        return res.status(400).json({ message: "กรุณาระบุชื่อผู้ใช้" });
+    }
+    try {
+        const query = `
+            UPDATE Users
+            SET username = $1
+            WHERE userid = $2
+            RETURNING userid, username, email, role;
+        `;
+        const result = await database.query(query, [username, userId]);
+        if (result.rowCount === 0) {
+            return res.status(404).json({ message: "ไม่พบผู้ใช้งานนี้ในระบบ" });
+        }
+        const updatedUser = result.rows[0];
+        const newToken = jwt.sign(
+            { id: updatedUser.userid, username: updatedUser.username, name: updatedUser.username, role: updatedUser.role, email: updatedUser.email },
+            process.env.JWT_SECRET,
+            { expiresIn: '1d' }
+        );
+        res.cookie('token', newToken, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'strict',
+            maxAge: 24 * 60 * 60 * 1000,
+        });
+        res.status(200).json({
+            message: "อัปเดตโปรไฟล์สำเร็จ",
+            user: updatedUser,
+            token: newToken,
+        });
+    } catch (error) {
+        console.error("Edit Own Profile Error:", error);
+        if (error.code === '23505') {
+            return res.status(400).json({ message: "Username นี้มีคนใช้งานในระบบแล้ว กรุณาใช้ชื่อผู้ใช้อื่น" });
+        }
+        res.status(500).json({ message: "เกิดข้อผิดพลาดในการอัปเดตโปรไฟล์" });
     }
 };
